@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block content %}
+<div class="page-head"><div><h1>日历</h1><p>点击某一天，查看当天应该完成的计划。</p></div>
+<div class="month-nav"><a href="?month={{prev}}">‹</a><strong>{{month}}</strong><a href="?month={{nxt}}">›</a></div></div>
+<div class="calendar">
+{% for w in ['一','二','三','四','五','六','日'] %}<div class="weekday">{{w}}</div>{% endfor %}
+{% for cell in cells %}
+{% if cell %}
+<div class="day {% if cell.date==today %}today{% endif %}" onclick='openDay({{cell|tojson}})'>
+<b>{{cell.day}}</b>{% for p in cell.due[:3] %}<div class="dot {% if p.done %}done{% endif %}"></div>{% endfor %}
+</div>
+{% else %}<div class="day blank"></div>{% endif %}
+{% endfor %}
+</div>
+<div id="modal" class="modal hidden"><div class="modal-box"><button class="close" onclick="closeDay()">×</button><h2 id="modalTitle"></h2><div id="modalBody"></div></div></div>
+<script>
+function openDay(c){
+ document.getElementById('modalTitle').textContent=c.date+' 需要完成的计划';
+ const body=document.getElementById('modalBody');
+ if(!c.due.length){body.innerHTML='<p class="muted">这一天没有安排打卡。</p>';}
+ else body.innerHTML=c.due.map(p=>`<div class="day-plan"><span>${p.done?'✓':'○'}</span><b>${escapeHtml(p.title)}</b><em>${p.done?'已完成':'待完成'}</em></div>`).join('');
+ document.getElementById('modal').classList.remove('hidden');
+}
+function closeDay(){document.getElementById('modal').classList.add('hidden')}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+</script>
+{% endblock %}

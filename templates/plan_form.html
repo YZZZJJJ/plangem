@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<div class="form-card">
+<h1>新建计划</h1>
+<form method="post">
+<label>计划名称<input name="title" placeholder="例如：英语学习 / 健身 / 作品集" required></label>
+<label>计划说明<textarea name="description" placeholder="写下这个计划想达成什么"></textarea></label>
+<div class="row">
+<label>开始日期<input type="date" name="start_date" value="{{today}}" required></label>
+<label>打卡间隔（天）<input type="number" min="1" name="interval_days" value="1" required></label>
+</div>
+<label>结束日期（可选）<input type="date" name="end_date"></label>
+<button>保存计划</button>
+</form>
+</div>
+{% endblock %}

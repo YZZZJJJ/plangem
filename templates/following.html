@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block content %}
+<div class="page-head"><div><h1>关注</h1><p>搜索用户ID，查看公开计划与打卡记录。</p></div></div>
+<section class="panel">
+<form method="get" class="search"><input name="q" value="{{q}}" placeholder="输入用户ID，例如 study_001"><button>搜索</button></form>
+<form method="post" action="{{url_for('follow')}}" class="search"><input name="user_id" placeholder="关注一个用户ID"><button>＋ 关注</button></form>
+</section>
+{% if selected %}
+<section class="panel">
+<h2>@{{selected['user_id']}}</h2>
+{% for p in plans %}
+<div class="public-plan">
+<div><a href="{{url_for('plan_detail',plan_id=p['id'])}}"><h3>{{p['title']}}</h3></a><p>{{p['description']}}</p>
+<span class="meta">每 {{p['interval_days']}} 天 · 开始 {{p['start_date']}}</span></div>
+<form method="post" action="{{url_for('nudge',plan_id=p['id'])}}"><button class="secondary">⏰ 催促</button></form>
+</div>
+{% else %}<p class="muted">该用户还没有公开计划。</p>{% endfor %}
+</section>
+{% endif %}
+<section class="panel"><h2>我关注的人</h2>
+{% for u in followed %}<span class="follow-pill">@{{u['user_id']}}</span>{% else %}<p class="muted">暂未关注用户。</p>{% endfor %}
+</section>
+{% endblock %}

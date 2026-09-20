@@ -1,0 +1,54 @@
+{% extends "base.html" %}{% block content %}
+<div class="page-head">
+<div><div class="tag">每 {{plan['interval_days']}} 天打卡</div><h1>{{plan['title']}}</h1><p>{{plan['description']}}</p></div>
+<a class="button secondary" href="{{url_for('calendar')}}">查看日历</a>
+</div>
+<section class="panel">
+{% if plan['user_id'] == me['id'] %}
+<h2>今日/指定日期打卡</h2>
+<form method="post" action="{{url_for('checkin',plan_id=plan['id'])}}" enctype="multipart/form-data">
+<div class="row">
+<label>打卡日期<input type="date" name="checkin_date" value="{{today}}"></label>
+<label>备注<input name="note" placeholder="今天完成了什么？"></label>
+</div>
+<label>图片或文档 <input type="file" name="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"></label>
+<button>✓ 提交打卡</button>
+</form>
+{% else %}
+<h2>计划打卡</h2>
+<p class="muted">这是其他用户的公开计划。你可以查看打卡记录、评论或发送催促，但不能代替对方打卡。</p>
+{% endif %}
+</section>
+<section class="panel">
+<h2>打卡记录</h2>
+{% if checkins %}
+{% for c in checkins %}
+<div class="record"><div><strong>{{c['checkin_date']}}</strong><p>{{c['note']}}</p></div>
+{% if c['stored_name'] %}
+    <!-- 判断文件是否为图片 -->
+    {% set ext = c['file_name'].rsplit('.', 1)[-1].lower() if '.' in c['file_name'] else '' %}
+    {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+        <!-- 如果是图片：显示缩略图，点击可在新标签页查看大图 -->
+        <div style="margin-top: 8px;">
+            <a href="{{ url_for('files', name=c['stored_name']) }}" target="_blank" title="点击查看大图">
+                <img src="{{ url_for('files', name=c['stored_name']) }}" 
+                     alt="打卡图片" 
+                     style="max-height: 200px; max-width: 100%; border-radius: 8px; border: 1px solid #ddd; cursor: pointer;">
+            </a>
+        </div>
+    {% else %}
+        <!-- 如果是文档：保持原来的下载链接 -->
+        <a href="{{ url_for('files', name=c['stored_name']) }}">📎 {{ c['file_name'] }}</a>
+    {% endif %}
+{% endif %}</div>
+{% endfor %}
+{% else %}<p class="muted">还没有打卡记录。</p>{% endif %}
+</section>
+<section class="panel">
+<h2>评论</h2>
+<form method="post" action="{{url_for('comment',plan_id=plan['id'])}}" class="comment-form">
+<input name="content" placeholder="留下鼓励、建议或提醒…" required><button>评论</button>
+</form>
+{% for c in comments %}<div class="comment"><b>@{{c['commenter_name']}}</b><span>{{c['content']}}</span></div>{% else %}<p class="muted">暂无评论。</p>{% endfor %}
+</section>
+{% endblock %}

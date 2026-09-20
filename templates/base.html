@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlanMate · 计划打卡</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="{{ url_for('home') }}">PlanMate</a>
+  {% if me %}
+  <nav>
+    <a href="{{ url_for('home') }}">个人</a>
+    <a href="{{ url_for('following') }}">关注</a>
+    <a href="{{ url_for('calendar') }}">日历</a>
+    <a href="{{ url_for('new_plan') }}">新建计划</a>
+    <a href="{{ url_for('logout') }}">退出</a>
+  </nav>
+  <span class="uid">@{{ me['user_id'] }}</span>
+  {% endif %}
+</header>
+{% if me %}<div class="mobile-nav"><a href="{{ url_for('home') }}">个人</a><a href="{{ url_for('following') }}">关注</a><a href="{{ url_for('calendar') }}">日历</a><a href="{{ url_for('new_plan') }}">新建</a></div>{% endif %}
+<main class="container">
+{% with messages=get_flashed_messages() %}
+{% if messages %}<div class="flash">{% for m in messages %}<div>{{m}}</div>{% endfor %}</div>{% endif %}
+{% endwith %}
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

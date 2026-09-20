@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block content %}
+<div class="auth-card">
+<h1>欢迎回来</h1><p>登录你的计划与打卡空间</p>
+<form method="post">
+<input name="user_id" placeholder="用户ID" required autofocus>
+<input name="password" type="password" placeholder="密码" required>
+<button>登录</button>
+</form>
+<a class="muted-link" href="{{url_for('register')}}">第一次使用？创建ID</a>
+</div>
+{% endblock %}

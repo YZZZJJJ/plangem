@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block content %}
+<div class="auth-card">
+<h1>创建你的ID</h1><p>ID全站唯一，建议使用容易记忆的昵称。</p>
+<form method="post">
+<input name="user_id" placeholder="3-24位字母、数字、下划线" required>
+<input name="password" type="password" placeholder="至少6位密码" required>
+<button>创建账号</button>
+</form>
+<a class="muted-link" href="{{url_for('login')}}">已有账号？登录</a>
+</div>
+{% endblock %}
