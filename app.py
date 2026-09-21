@@ -62,6 +62,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS comments(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       plan_id INTEGER NOT NULL,
+      checkin_id INTEGER,  --  新增：关联具体的打卡记录
       user_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -246,19 +247,22 @@ def files(name):
     # 如果是图片，直接在浏览器内联显示（即预览大图）；其他文件依然作为附件下载
     as_attachment = not (mimetype and mimetype.startswith('image/'))
     return send_from_directory(UPLOAD_DIR, name, as_attachment=as_attachment)
+
 @app.route("/plan/<int:plan_id>/comment", methods=["POST"])
 def comment(plan_id):
     if not login_required(): return redirect(url_for("login"))
     content = request.form.get("content","").strip()
+    checkin_id = request.form.get("checkin_id", type=int)  #  接收打卡ID
     if content:
         con=db()
         p=con.execute("SELECT id FROM plans WHERE id=?",(plan_id,)).fetchone()
         if p:
-            con.execute("INSERT INTO comments(plan_id,user_id,content,created_at) VALUES(?,?,?,?)",
-                        (plan_id,session["uid"],content,datetime.now().isoformat()))
+            con.execute("""INSERT INTO comments(plan_id, checkin_id, user_id, content, created_at) 
+                           VALUES(?,?,?,?,?)""",
+                        (plan_id, checkin_id, session["uid"], content, datetime.now().strftime("%Y-%m-%d %H:%M"))) #  精确到分钟
             con.commit()
         con.close()
-    return redirect(url_for("plan_detail",plan_id=plan_id))
+    return redirect(request.referrer or url_for("plan_detail",plan_id=plan_id))
 
 @app.route("/follow", methods=["POST"])
 def follow():
@@ -298,15 +302,17 @@ def following():
     followed = con.execute("""SELECT u.id, u.user_id FROM follows f 
                               JOIN users u ON f.following_id = u.id
                               WHERE f.follower_id = ? ORDER BY u.user_id""", (session["uid"],)).fetchall()
+    
+    # 提取已关注用户的 id 列表，传给前端
     followed_ids = [f["id"] for f in followed]
     
     selected = None
     plans = []
     comments = []
-    feed = []  # 用于存放关注动态时间线
+    feed = []
     
     if q:
-        # 模式1：搜索或点击了 @xxx 链接，查看特定用户
+        # ========== 模式1：搜索或点击了 @xxx 链接，查看特定用户 ==========
         selected = con.execute("SELECT id, user_id FROM users WHERE user_id=?", (q,)).fetchone()
         if selected:
             plans = con.execute("""SELECT p.*, u.user_id AS creator_name FROM plans p 
@@ -317,9 +323,9 @@ def following():
                                                 JOIN users u ON c.user_id = u.id
                                                 WHERE c.plan_id=? ORDER BY c.created_at DESC""", (p["id"],)).fetchall())
     else:
-        # 模式2：没有搜索词，展示“关注动态”时间线
-        # 查询所有已关注用户的打卡记录，按时间倒序排列
-        feed = con.execute("""
+        # ========== 模式2：关注动态（时间线帖子流） ==========
+        # ⭐ 注意：以下所有代码都必须缩进在 else 下面！
+        feed_items = con.execute("""
             SELECT c.id, c.checkin_date, c.note, c.file_name, c.stored_name, c.created_at,
                    u.user_id AS creator_name, p.title AS plan_title, p.id AS plan_id
             FROM checkins c
@@ -329,9 +335,20 @@ def following():
             ORDER BY c.created_at DESC
         """, (session["uid"],)).fetchall()
         
+        feed = []
+        for item in feed_items:
+            item_dict = dict(item)
+            # 查询该打卡记录对应的评论
+            item_dict['comments'] = con.execute("""
+                SELECT c.*, u.user_id AS commenter_name 
+                FROM comments c JOIN users u ON c.user_id = u.id
+                WHERE c.checkin_id = ? ORDER BY c.created_at ASC
+            """, (item['id'],)).fetchall()
+            feed.append(item_dict)
+        
     con.close()
-    return render_template("following.html", followed=followed, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
-
+    # ⭐ 这里也是平级的，不能被包进 else 里面
+    return render_template("following.html", followed=followed, followed_ids=followed_ids, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
 @app.route("/nudge/<int:plan_id>", methods=["POST"])
 def nudge(plan_id):
     if not login_required(): return redirect(url_for("login"))

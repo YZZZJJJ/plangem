@@ -80,34 +80,56 @@
     <section class="panel">
         <h2>最新动态</h2>
         {% if feed %}
-            {% for item in feed %}
-                <div class="feed-item" style="border-bottom:1px solid #eee; padding:15px 0;">
-                    <div style="display:flex; justify-content:space-between;">
-                        <div>
-                            <a href="{{ url_for('following', q=item.creator_name) }}" style="font-weight:bold; text-decoration:none;">@{{ item.creator_name }}</a>
-                            在计划 <a href="{{ url_for('plan_detail', plan_id=item.plan_id) }}" style="text-decoration:none;">{{ item.plan_title }}</a> 打卡了
-                        </div>
-                        <span class="muted">{{ item.checkin_date }}</span>
-                    </div>
-                    
-                    {% if item.note %}
-                        <p style="margin-top:8px; color:#333;">{{ item.note }}</p>
-                    {% endif %}
-                    
-                    {% if item.stored_name %}
-                        {% set ext = item.file_name.rsplit('.', 1)[-1].lower() if '.' in item.file_name else '' %}
-                        {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
-                            <div style="margin-top:10px;">
-                                <a href="{{ url_for('files', name=item.stored_name) }}" target="_blank">
-                                    <img src="{{ url_for('files', name=item.stored_name) }}" style="max-height:150px; border-radius:6px; border:1px solid #ddd;">
-                                </a>
-                            </div>
-                        {% else %}
-                            <p style="margin-top:8px;"><a href="{{ url_for('files', name=item.stored_name) }}">📎 下载附件: {{ item.file_name }}</a></p>
-                        {% endif %}
-                    {% endif %}
-                </div>
-            {% endfor %}
+		{% for item in feed %}
+   			 <div class="feed-item" style="border-bottom:1px solid #eee; padding:15px 0;">
+        			<div style="display:flex; justify-content:space-between;">
+            				<div>
+                				<a href="{{ url_for('following', q=item.creator_name) }}" style="font-weight:bold; text-decoration:none;">@{{ item.creator_name }}</a>
+               					 在计划 <a href="{{ url_for('plan_detail', plan_id=item.plan_id) }}" style="text-decoration:none;">{{ item.plan_title }}</a> 打卡了
+            				</div>
+            				<span class="muted">{{ item.checkin_date }}</span>
+        			</div>
+        
+        			{% if item.note %}
+            				<p style="margin-top:8px; color:#333;">{{ item.note }}</p>
+       				{% endif %}
+        
+        			{% if item.stored_name %}
+            				{% set ext = item.file_name.rsplit('.', 1)[-1].lower() if '.' in item.file_name else '' %}
+            				{% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+                				<div style="margin-top:10px;">
+                    					<a href="{{ url_for('files', name=item.stored_name) }}" target="_blank">
+                        					<img src="{{ url_for('files', name=item.stored_name) }}" style="max-height:150px; border-radius:6px; border:1px solid #ddd;">
+                    					</a>
+                				</div>
+           				{% else %}
+                				<p style="margin-top:8px;"><a href="{{ url_for('files', name=item.stored_name) }}">📎 下载附件: {{ item.file_name }}</a></p>
+            				{% endif %}
+       				{% endif %}
+
+        			<!-- ⭐ 新增：评论展示区（类似微信） -->
+        			<div style="margin-top: 12px; background: #f7f7f7; padding: 10px; border-radius: 8px;">
+            				{% for c in item.comments %}
+                				<div style="font-size: 14px; margin-bottom: 6px; line-height: 1.4;">
+                    					<b style="color: #2c3e50;">@{{ c.commenter_name }}</b>: {{ c.content }}
+                    					<span style="color: #999; font-size: 12px; margin-left: 8px;">{{ c.created_at }}</span>
+                				</div>
+            				{% else %}
+                				<div style="font-size: 13px; color: #aaa; margin-bottom: 6px;">暂无评论</div>
+           				{% endfor %}
+            
+            				<!-- ⭐ 新增：评论输入框（防重复提交） -->
+            				<form method="post" action="{{ url_for('comment', plan_id=item.plan_id) }}" 
+                  				style="display:flex; margin-top:8px;" 
+                  				onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerText='...';">
+                				<input type="hidden" name="checkin_id" value="{{ item.id }}">
+                				<input name="content" placeholder="写下你的评论..." required 
+                       					style="flex:1; padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;">
+                				<button style="margin-left:8px; padding:6px 12px; font-size:13px; background:#2c3e50; color:#fff; border:none; border-radius:4px; cursor:pointer;">发送</button>
+            				</form>
+        			</div>
+   			</div>
+		{% endfor %}
         {% else %}
             <p class="muted">你关注的人还没有打卡记录，或者你还没有关注任何人。</p>
         {% endif %}
