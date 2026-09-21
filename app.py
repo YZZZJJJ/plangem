@@ -11,8 +11,8 @@ from email.header import Header
 #  邮件配置（通过环境变量传入，本地测试可以直接写死）
 MAIL_HOST = os.environ.get("MAIL_HOST", "smtp.qq.com")
 MAIL_PORT = int(os.environ.get("MAIL_PORT", 465))
-MAIL_USER = os.environ.get("MAIL_USER", "2011779245@qq.com")   # 你的发件邮箱
-MAIL_PASS = os.environ.get("MAIL_PASS", "drhyuccjvlvwdcie")   # 上面申请的授权码
+MAIL_USER = os.environ.get("MAIL_USER", "")   # 你的发件邮箱
+MAIL_PASS = os.environ.get("MAIL_PASS", "")   # 上面申请的授权码
 MAIL_FROM = os.environ.get("MAIL_FROM", MAIL_USER)
 
 def send_mail(to, subject, body):
