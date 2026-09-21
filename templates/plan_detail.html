@@ -6,15 +6,200 @@
 <section class="panel">
 {% if plan['user_id'] == me['id'] %}
 <h2>今日/指定日期打卡</h2>
-<form method="post" action="{{url_for('checkin',plan_id=plan['id'])}}" enctype="multipart/form-data">
+<form id="checkin-form" method="post" action="{{url_for('checkin',plan_id=plan['id'])}}" enctype="multipart/form-data">
 <div class="row">
-<label>打卡日期<input type="date" name="checkin_date" value="{{today}}"></label>
-<label>备注<input name="note" placeholder="今天完成了什么？"></label>
+    <label>打卡日期<input type="date" id="checkin-date" name="checkin_date" value="{{today}}"></label>
+    <label>备注<input id="checkin-note" name="note" placeholder="今天完成了什么？"></label>
 </div>
-<label>图片或文档 <input type="file" name="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"></label>
-<button>✓ 提交打卡</button>
+
+<div id="drop-zone" style="border:2px dashed #bbb; border-radius:10px; padding:24px; text-align:center; color:#666; background:#fafafa; cursor:pointer; transition:all 0.2s; margin-top:10px;">
+    <div style="font-size:32px;">📁</div>
+    <p style="margin:8px 0 4px; font-weight:bold; color:#2c3e50;">点击选择文件 / 拖拽到这里</p>
+    <p style="font-size:12px; margin:0;">支持图片、PDF、Word 等，可多次添加</p>
+    <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" style="display:none;">
+</div>
+
+<button type="button" id="add-more-btn" style="margin-top:10px; width:100%; padding:10px; background:#eef4fa; color:#2c3e50; border:1px solid #cfdce8; border-radius:8px; cursor:pointer; font-size:14px;">
+    ➕ 再添加文件
+</button>
+
+<div id="file-list" style="margin-top:12px; display:flex; flex-direction:column; gap:6px;"></div>
+
+<div id="upload-tip" style="color:#888; font-size:13px; margin-top:8px;"></div>
+<button type="submit" id="submit-btn" style="margin-top:12px;">✓ 提交打卡</button>
 </form>
-{% else %}
+
+<script>
+/* ============ 文件队列管理 ============ */
+let fileQueue = [];
+
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileList = document.getElementById('file-list');
+const form = document.getElementById('checkin-form');
+const btn = document.getElementById('submit-btn');
+const tip = document.getElementById('upload-tip');
+
+dropZone.addEventListener('click', () => fileInput.click());
+document.getElementById('add-more-btn').addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', e => {
+    addFiles(Array.from(e.target.files));
+    fileInput.value = '';
+});
+
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.style.borderColor = '#2c3e50';
+    dropZone.style.background = '#eef4fa';
+}));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.style.borderColor = '#bbb';
+    dropZone.style.background = '#fafafa';
+}));
+dropZone.addEventListener('drop', e => {
+    addFiles(Array.from(e.dataTransfer.files));
+});
+
+function addFiles(files) {
+    let added = 0;
+    for (const f of files) {
+        const dup = fileQueue.some(x => x.name === f.name && x.size === f.size);
+        if (dup) continue;
+        fileQueue.push(f);
+        added++;
+    }
+    if (added > 0) tip.innerText = `已添加 ${added} 个，共 ${fileQueue.length} 个文件`;
+    renderFileList();
+}
+
+function renderFileList() {
+    fileList.innerHTML = '';
+    fileQueue.forEach((f, i) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#f4f4f4; border-radius:6px; font-size:14px;';
+        const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(2)+'MB' : (f.size/1024).toFixed(0)+'KB';
+        const preview = f.type.startsWith('image/') ? '🖼️' : '📄';
+        item.innerHTML = `<span>${preview} ${escapeHtml(f.name)} <span style="color:#999;">(${size})</span></span>
+                          <button type="button" style="background:#e74c3c; color:#fff; border:none; border-radius:4px; padding:3px 10px; cursor:pointer; font-size:12px;">删除</button>`;
+        item.querySelector('button').onclick = () => {
+            fileQueue.splice(i, 1);
+            renderFileList();
+            tip.innerText = `已移除，剩余 ${fileQueue.length} 个文件`;
+        };
+        fileList.appendChild(item);
+    });
+}
+
+function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+}
+
+ 
+/* ============ 提交：FormData + fetch + JSON 响应 ============ */
+form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    btn.disabled = true;
+    btn.innerText = '压缩图片中...';
+
+    try {
+        const formData = new FormData();
+        formData.append('checkin_date', document.getElementById('checkin-date').value);
+        formData.append('note', document.getElementById('checkin-note').value);
+
+        let before = 0, after = 0;
+        for (const f of fileQueue) {
+            if (f.type.startsWith('image/')) {
+                const compressed = await compressImage(f, 1280, 0.8);
+                before += f.size; after += compressed.size;
+                formData.append('file', compressed);
+            } else {
+                formData.append('file', f);
+            }
+        }
+        if (before > 0) {
+            tip.innerText = `图片压缩：${(before/1024/1024).toFixed(2)}MB → ${(after/1024).toFixed(0)}KB`;
+        }
+        btn.innerText = '上传中...';
+
+        // ⭐ 带 X-Requested-With 头，后端识别为 AJAX
+        const res = await fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+            // ⭐ 显示成功弹窗
+            showSuccessModal(data.plan_title, data.time);
+            // 2 秒后刷新页面，让打卡记录显示出来
+            setTimeout(() => { window.location.reload(); }, 1800);
+        } else {
+            alert(data.msg);
+            btn.disabled = false;
+            btn.innerText = '✓ 提交打卡';
+        }
+    } catch (err) {
+        alert('上传失败：' + err.message);
+        btn.disabled = false;
+        btn.innerText = '✓ 提交打卡';
+    }
+});
+
+/* ============ 成功弹窗 ============ */
+function showSuccessModal(planTitle, timeStr) {
+    // 如果已存在就删除，避免重复
+    const old = document.getElementById('successModal');
+    if (old) old.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'successModal';
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; display:flex; align-items:center; justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:32px 40px; max-width:360px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.25); animation:pop 0.3s ease-out;">
+            <div style="font-size:56px; line-height:1; margin-bottom:12px;">✅</div>
+            <h2 style="margin:0 0 8px; color:#2c3e50;">打卡成功！</h2>
+            <p style="color:#666; margin:8px 0; font-size:15px;">「${escapeHtml(planTitle)}」</p>
+            <p style="color:#999; font-size:13px; margin:4px 0 0;">${escapeHtml(timeStr)}</p>
+            <button onclick="document.getElementById('successModal').remove();" 
+                    style="margin-top:20px; padding:10px 28px; background:#2c3e50; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px;">
+                知道了
+            </button>
+        </div>
+        <style>@keyframes pop { 0% { transform: scale(0.75); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }</style>
+    `;
+    document.body.appendChild(modal);
+    // 点击背景关闭
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function compressImage(file, maxWidth, quality) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => {
+            const img = new Image();
+            img.onload = () => {
+                let w = img.width, h = img.height;
+                if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                canvas.toBlob(blob => {
+                    if (!blob) return reject(new Error('压缩失败'));
+                    const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+                    resolve(new File([blob], newName, { type: 'image/jpeg' }));
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+</script>{% else %}
 <h2>计划打卡</h2>
 <p class="muted">这是其他用户的公开计划。你可以查看打卡记录、评论或发送催促，但不能代替对方打卡。</p>
 {% endif %}
@@ -23,24 +208,55 @@
 <h2>打卡记录</h2>
 {% if checkins %}
 {% for c in checkins %}
-<div class="record"><div><strong>{{c['checkin_date']}}</strong><p>{{c['note']}}</p></div>
-{% if c['stored_name'] %}
-    <!-- 判断文件是否为图片 -->
-    {% set ext = c['file_name'].rsplit('.', 1)[-1].lower() if '.' in c['file_name'] else '' %}
-    {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
-        <!-- 如果是图片：显示缩略图，点击可在新标签页查看大图 -->
-        <div style="margin-top: 8px;">
-            <a href="{{ url_for('files', name=c['stored_name']) }}" target="_blank" title="点击查看大图">
-                <img src="{{ url_for('files', name=c['stored_name']) }}" 
-                     alt="打卡图片" 
-                     style="max-height: 200px; max-width: 100%; border-radius: 8px; border: 1px solid #ddd; cursor: pointer;">
-            </a>
+<div class="record" style="display:block; border-bottom:1px solid #eee; padding:12px 0;">
+ 
+    
+    <div>
+        <strong>{{ c['checkin_date'] }}</strong>
+        {% if c['note'] %}<p style="margin:4px 0; color:#333;">{{ c['note'] }}</p>{% endif %}
+    </div>
+
+    {% if c.files %}
+        {# 分类：图片 / 其他文件 #}
+        {% set images = [] %}
+        {% set others = [] %}
+        {% for f in c.files %}
+            {% set ext = f.file_name.rsplit('.', 1)[-1].lower() if '.' in f.file_name else '' %}
+            {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+                {% set _ = images.append(f) %}
+            {% else %}
+                {% set _ = others.append(f) %}
+            {% endif %}
+        {% endfor %}
+
+        {# ⭐ 图片区：横向排列缩略图 #}
+        {% if images %}
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+            {% for f in images %}
+                <a href="{{ url_for('files', name=f.stored_name) }}" target="_blank" title="点击查看大图">
+                    <img src="{{ url_for('files', name=f.stored_name) }}"
+                         alt="打卡图片"
+                         style="width:110px; height:110px; object-fit:cover; border-radius:8px; border:1px solid #ddd; cursor:pointer; transition:transform 0.15s;"
+                         onmouseover="this.style.transform='scale(1.05)'"
+                         onmouseout="this.style.transform='scale(1)'">
+                </a>
+            {% endfor %}
         </div>
-    {% else %}
-        <!-- 如果是文档：保持原来的下载链接 -->
-        <a href="{{ url_for('files', name=c['stored_name']) }}">📎 {{ c['file_name'] }}</a>
+        {% endif %}
+
+        {# ⭐ 文件区：图片下方，纵向排列 #}
+        {% if others %}
+        <div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">
+            {% for f in others %}
+                <a href="{{ url_for('files', name=f.stored_name) }}"
+                   style="display:inline-block; padding:6px 12px; background:#f4f4f4; border-radius:6px; font-size:14px; color:#2c3e50; text-decoration:none; width:fit-content;">
+                    📎 {{ f.file_name }}
+                </a>
+            {% endfor %}
+        </div>
+        {% endif %}
     {% endif %}
-{% endif %}</div>
+</div>
 {% endfor %}
 {% else %}<p class="muted">还没有打卡记录。</p>{% endif %}
 </section>

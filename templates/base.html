@@ -29,7 +29,8 @@
 {% if me %}<div class="mobile-nav"><a href="{{ url_for('home') }}">个人</a><a href="{{ url_for('following') }}">关注</a><a href="{{ url_for('calendar') }}">日历</a><a href="{{ url_for('new_plan') }}">新建</a></div>{% endif %}
 <main class="container">
 {% with messages=get_flashed_messages() %}
-{% if messages %}<div class="flash">{% for m in messages %}<div>{{m}}</div>{% endfor %}</div>{% endif %}
+{% if messages %}<div class="flash">{% for m in messages %}<div>{{m}}</div>{% endfor %}</div>
+{% endif %}
 {% endwith %}
 {% block content %}{% endblock %}
 </main>

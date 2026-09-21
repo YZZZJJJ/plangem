@@ -85,6 +85,14 @@ def init_db():
       FOREIGN KEY(plan_id) REFERENCES plans(id),
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
+    CREATE TABLE IF NOT EXISTS checkin_files(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      checkin_id INTEGER NOT NULL,
+      file_name TEXT,
+      stored_name TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(checkin_id) REFERENCES checkins(id)
+    );
     CREATE TABLE IF NOT EXISTS follows(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       follower_id INTEGER NOT NULL,
@@ -314,7 +322,12 @@ def plan_detail(plan_id):
     if not p:
         con.close(); return "Not found",404
         
-    checkins = con.execute("SELECT * FROM checkins WHERE plan_id=? ORDER BY checkin_date DESC", (plan_id,)).fetchall()
+    checkins_raw = con.execute("SELECT * FROM checkins WHERE plan_id=? ORDER BY checkin_date DESC", (plan_id,)).fetchall()
+    checkins = []
+    for c in checkins_raw:
+        c_dict = dict(c)
+        c_dict["files"] = con.execute("SELECT * FROM checkin_files WHERE checkin_id=?", (c["id"],)).fetchall()
+        checkins.append(c_dict)
     
     # 同样的修复：给评论的用户名起别名 AS commenter_name
     comments = con.execute("""SELECT c.*, u.user_id AS commenter_name FROM comments c JOIN users u ON c.user_id=u.id
@@ -326,33 +339,68 @@ def plan_detail(plan_id):
 @app.route("/plan/<int:plan_id>/checkin", methods=["POST"])
 def checkin(plan_id):
     if not login_required(): return redirect(url_for("login"))
+    
+    # 判断是否 AJAX 请求
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    
     con = db()
     p = con.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
     if not p:
-        con.close(); return "Not found",404
-    # Owner or followed users may view, but only owner can check in.
+        con.close()
+        if is_ajax: return {"ok": False, "msg": "计划不存在"}
+        return "Not found", 404
     if p["user_id"] != session["uid"]:
-        con.close(); flash("只有计划创建者可以打卡"); return redirect(url_for("plan_detail",plan_id=plan_id))
+        con.close()
+        if is_ajax: return {"ok": False, "msg": "只有计划创建者可以打卡"}
+        flash("只有计划创建者可以打卡"); return redirect(url_for("plan_detail", plan_id=plan_id))
+
     d = request.form.get("checkin_date") or date.today().isoformat()
-    note = request.form.get("note","").strip()
-    f = request.files.get("file")
-    original = stored = None
-    if f and f.filename:
-        if not valid_file(f.filename):
-            con.close(); flash("不支持的文件类型"); return redirect(url_for("plan_detail",plan_id=plan_id))
-        original = secure_filename(f.filename)
-        stored = f"{uuid.uuid4().hex}_{original}"
-        f.save(os.path.join(UPLOAD_DIR, stored))
+    note = request.form.get("note", "").strip()
+    files = request.files.getlist("file")
+
     try:
-        con.execute("""INSERT INTO checkins(plan_id,user_id,checkin_date,note,file_name,stored_name,created_at)
-                       VALUES(?,?,?,?,?,?,?)""",
-                    (plan_id,session["uid"],d,note,original,stored,datetime.now().isoformat()))
+        cur = con.execute("""INSERT INTO checkins(plan_id, user_id, checkin_date, note, created_at)
+                             VALUES(?,?,?,?,?)""",
+                          (plan_id, session["uid"], d, note, datetime.now().isoformat()))
+        checkin_id = cur.lastrowid
+
+        saved = 0
+        for f in files:
+            if not f or not f.filename: continue
+            if not valid_file(f.filename): continue
+            original = secure_filename(f.filename)
+            stored = f"{uuid.uuid4().hex}_{original}"
+            f.save(os.path.join(UPLOAD_DIR, stored))
+            con.execute("""INSERT INTO checkin_files(checkin_id, file_name, stored_name, created_at)
+                           VALUES(?,?,?,?)""",
+                        (checkin_id, original, stored, datetime.now().isoformat()))
+            saved += 1
         con.commit()
-        flash("打卡成功")
+        con.close()
+        
+        # ⭐ AJAX：返回 JSON
+        if is_ajax:
+            return {
+                "ok": True,
+                "plan_title": p["title"],
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+        # 普通表单提交：走原来的 flash + redirect
+        flash(f"CHECKIN_OK::{p['title']}::{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        return redirect(url_for("plan_detail", plan_id=plan_id))
+        
     except sqlite3.IntegrityError:
-        flash("这一天已经打卡")
-    con.close()
-    return redirect(url_for("plan_detail",plan_id=plan_id))
+        con.close()
+        msg = "这一天已经打卡"
+        if is_ajax: return {"ok": False, "msg": msg}
+        flash(msg)
+        return redirect(url_for("plan_detail", plan_id=plan_id))
+    except Exception as e:
+        con.close()
+        msg = f"打卡失败: {e}"
+        if is_ajax: return {"ok": False, "msg": msg}
+        flash(msg)
+        return redirect(url_for("plan_detail", plan_id=plan_id))
 
 
 @app.route("/files/<path:name>")
@@ -434,7 +482,7 @@ def following():
                                    JOIN users u ON p.user_id = u.id 
                                    WHERE p.user_id=? ORDER BY p.start_date DESC""", (selected["id"],)).fetchall()
             
-            # ⭐ 新增：判断提醒按钮逻辑
+            #  新增：判断提醒按钮逻辑
             now = datetime.now()
             today_date = date.today()
             plans = []
@@ -476,7 +524,7 @@ def following():
                                                 WHERE c.plan_id=? ORDER BY c.created_at DESC""", (p["id"],)).fetchall())
     else:
         # ========== 模式2：关注动态（时间线帖子流） ==========
-        # ⭐ 注意：以下所有代码都必须缩进在 else 下面！
+        #  注意：以下所有代码都必须缩进在 else 下面！
         feed_items = con.execute("""
             SELECT c.id, c.checkin_date, c.note, c.file_name, c.stored_name, c.created_at,
                    u.user_id AS creator_name, p.title AS plan_title, p.id AS plan_id
@@ -490,12 +538,10 @@ def following():
         feed = []
         for item in feed_items:
             item_dict = dict(item)
-            # 查询该打卡记录对应的评论
-            item_dict['comments'] = con.execute("""
-                SELECT c.*, u.user_id AS commenter_name 
-                FROM comments c JOIN users u ON c.user_id = u.id
-                WHERE c.checkin_id = ? ORDER BY c.created_at ASC
-            """, (item['id'],)).fetchall()
+            item_dict['files'] = con.execute("SELECT * FROM checkin_files WHERE checkin_id=?", (item['id'],)).fetchall()
+            item_dict['comments'] = con.execute("""SELECT c.*, u.user_id AS commenter_name 
+                                                   FROM comments c JOIN users u ON c.user_id = u.id
+                                                   WHERE c.checkin_id = ? ORDER BY c.created_at ASC""", (item['id'],)).fetchall()
             feed.append(item_dict)
         
     con.close()
@@ -529,7 +575,7 @@ def nudge(plan_id):
                 (plan_id, session["uid"], p["user_id"], now.isoformat()))
     con.commit()
     
-    # ⭐ 发送提醒邮件
+    #  发送提醒邮件
     target = con.execute("SELECT user_id, email, email_verified FROM users WHERE id=?", (p["user_id"],)).fetchone()
     sender = con.execute("SELECT user_id FROM users WHERE id=?", (session["uid"],)).fetchone()
     con.close()
@@ -579,7 +625,7 @@ def calendar():
     days = cal.monthrange(y, m)[1]
     con = db()
     
-    # ⭐ 新增：判断查看的是自己还是别人
+    #  新增：判断查看的是自己还是别人
     if target_user_id and target_user_id != session["uid"]:
         target_user = con.execute("SELECT id, user_id FROM users WHERE id=?", (target_user_id,)).fetchone()
         if not target_user:
@@ -615,7 +661,7 @@ def calendar():
     prev = (first - timedelta(days=1)).strftime("%Y-%m")
     nxt = (first + timedelta(days=32)).replace(day=1).strftime("%Y-%m")
     
-    # ⭐ 注意：把 is_owner 和 view_name 传给模板
+    #  注意：把 is_owner 和 view_name 传给模板
     return render_template("calendar.html", cells=cells, month=f"{y}年{m}月", prev=prev, nxt=nxt, 
                            is_owner=is_owner, view_name=view_name, target_user_id=target_user_id)
 

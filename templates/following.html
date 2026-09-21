@@ -115,18 +115,40 @@
             				<p style="margin-top:8px; color:#333;">{{ item.note }}</p>
        				{% endif %}
         
-        			{% if item.stored_name %}
-            				{% set ext = item.file_name.rsplit('.', 1)[-1].lower() if '.' in item.file_name else '' %}
-            				{% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
-                				<div style="margin-top:10px;">
-                    					<a href="{{ url_for('files', name=item.stored_name) }}" target="_blank">
-                        					<img src="{{ url_for('files', name=item.stored_name) }}" style="max-height:150px; border-radius:6px; border:1px solid #ddd;">
-                    					</a>
-                				</div>
-           				{% else %}
-                				<p style="margin-top:8px;"><a href="{{ url_for('files', name=item.stored_name) }}">📎 下载附件: {{ item.file_name }}</a></p>
-            				{% endif %}
-       				{% endif %}
+        			{% if item.files %}
+    {% set images = [] %}
+    {% set others = [] %}
+    {% for f in item.files %}
+        {% set ext = f.file_name.rsplit('.', 1)[-1].lower() if '.' in f.file_name else '' %}
+        {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+            {% set _ = images.append(f) %}
+        {% else %}
+            {% set _ = others.append(f) %}
+        {% endif %}
+    {% endfor %}
+
+    {% if images %}
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+        {% for f in images %}
+            <a href="{{ url_for('files', name=f.stored_name) }}" target="_blank">
+                <img src="{{ url_for('files', name=f.stored_name) }}"
+                     style="width:130px; height:130px; object-fit:cover; border-radius:8px; border:1px solid #ddd; cursor:pointer;">
+            </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if others %}
+    <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+        {% for f in others %}
+            <a href="{{ url_for('files', name=f.stored_name) }}"
+               style="display:inline-block; padding:6px 12px; background:#f4f4f4; border-radius:6px; font-size:14px; color:#2c3e50; text-decoration:none; width:fit-content;">
+                📎 {{ f.file_name }}
+            </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endif %}
 
         			<!-- ⭐ 新增：评论展示区（类似微信） -->
         			<div style="margin-top: 12px; background: #f7f7f7; padding: 10px; border-radius: 8px;">
