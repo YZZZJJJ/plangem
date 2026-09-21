@@ -1,41 +1,38 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-import sqlite3, os, uuid
+import sqlite3, os, uuid, random
 from datetime import datetime, date, timedelta
 import mimetypes  # 记得在文件顶部导入
-import smtplib, random
-from email.mime.text import MIMEText
-from email.header import Header
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
-#  邮件配置（通过环境变量传入，本地测试可以直接写死）
-MAIL_HOST = os.environ.get("MAIL_HOST", "smtp.qq.com")
-MAIL_PORT = int(os.environ.get("MAIL_PORT", 465))
-MAIL_USER = os.environ.get("MAIL_USER", "")   # 你的发件邮箱
-MAIL_PASS = os.environ.get("MAIL_PASS", "")   # 上面申请的授权码
-MAIL_FROM = os.environ.get("MAIL_FROM", MAIL_USER)
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+BREVO_SENDER = os.environ.get("BREVO_SENDER", "")   
+
 
 def send_mail(to, subject, body):
-    """发送邮件，返回 True/False"""
-    if not MAIL_USER or not MAIL_PASS:
-        print("[邮件] 未配置 MAIL_USER / MAIL_PASS，跳过发送")
+    if not BREVO_API_KEY or not BREVO_SENDER:
+        print("[邮件] ❌ 未配置 BREVO_API_KEY 或 BREVO_SENDER")
         return False
     try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = Header(subject, "utf-8")
-        msg["From"] = MAIL_FROM
-        msg["To"] = to
-        if MAIL_PORT == 465:
-            server = smtplib.SMTP_SSL(MAIL_HOST, MAIL_PORT, timeout=10)
-        else:
-            server = smtplib.SMTP(MAIL_HOST, MAIL_PORT, timeout=10)
-            server.starttls()
-        server.login(MAIL_USER, MAIL_PASS)
-        server.sendmail(MAIL_FROM, [to], msg.as_string())
-        server.quit()
+        config = sib_api_v3_sdk.Configuration()
+        config.api_key['api-key'] = BREVO_API_KEY
+        api = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(config))
+        email = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": to}],
+            sender={"email": BREVO_SENDER, "name": "PlanMate"},
+            subject=subject,
+            text_content=body
+        )
+        api.send_transac_email(email)
+        print("[邮件] ✅ 发送成功")
         return True
+    except ApiException as e:
+        print("[邮件] ❌ Brevo API 错误:", e)
+        return False
     except Exception as e:
-        print("[邮件] 发送失败:", e)
+        print("[邮件] ❌ 未知错误:", e)
         return False
 
 BASE = os.path.dirname(os.path.abspath(__file__))
