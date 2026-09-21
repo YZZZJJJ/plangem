@@ -4,6 +4,39 @@ from werkzeug.utils import secure_filename
 import sqlite3, os, uuid
 from datetime import datetime, date, timedelta
 import mimetypes  # 记得在文件顶部导入
+import smtplib, random
+from email.mime.text import MIMEText
+from email.header import Header
+
+#  邮件配置（通过环境变量传入，本地测试可以直接写死）
+MAIL_HOST = os.environ.get("MAIL_HOST", "smtp.qq.com")
+MAIL_PORT = int(os.environ.get("MAIL_PORT", 465))
+MAIL_USER = os.environ.get("MAIL_USER", "2011779245@qq.com")   # 你的发件邮箱
+MAIL_PASS = os.environ.get("MAIL_PASS", "drhyuccjvlvwdcie")   # 上面申请的授权码
+MAIL_FROM = os.environ.get("MAIL_FROM", MAIL_USER)
+
+def send_mail(to, subject, body):
+    """发送邮件，返回 True/False"""
+    if not MAIL_USER or not MAIL_PASS:
+        print("[邮件] 未配置 MAIL_USER / MAIL_PASS，跳过发送")
+        return False
+    try:
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = Header(subject, "utf-8")
+        msg["From"] = MAIL_FROM
+        msg["To"] = to
+        if MAIL_PORT == 465:
+            server = smtplib.SMTP_SSL(MAIL_HOST, MAIL_PORT, timeout=10)
+        else:
+            server = smtplib.SMTP(MAIL_HOST, MAIL_PORT, timeout=10)
+            server.starttls()
+        server.login(MAIL_USER, MAIL_PASS)
+        server.sendmail(MAIL_FROM, [to], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print("[邮件] 发送失败:", e)
+        return False
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "app.db")
@@ -23,10 +56,12 @@ def db():
 def init_db():
     con = db()
     con.executescript("""
-    CREATE TABLE IF NOT EXISTS users(
+     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      email TEXT,
+      email_verified INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS plans(
@@ -73,6 +108,15 @@ def init_db():
       from_user_id INTEGER NOT NULL,
       to_user_id INTEGER NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS email_codes(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      code TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0
     );
     """)
     con.commit()
@@ -126,21 +170,96 @@ def login():
         flash("ID或密码错误")
     return render_template("login.html")
 
+@app.route("/send_code", methods=["POST"])
+def send_code():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    
+    if not email or "@" not in email:
+        return {"ok": False, "msg": "邮箱格式不正确"}
+    
+    con = db()
+    # 检查邮箱是否已被注册
+    exists = con.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+    if exists:
+        con.close()
+        return {"ok": False, "msg": "该邮箱已被注册"}
+    
+    # 频率限制：60秒内只能发一次
+    last = con.execute("""SELECT created_at FROM email_codes 
+                          WHERE email=? AND purpose='register' 
+                          ORDER BY created_at DESC LIMIT 1""", (email,)).fetchone()
+    if last:
+        diff = (datetime.now() - datetime.fromisoformat(last["created_at"])).total_seconds()
+        if diff < 60:
+            con.close()
+            return {"ok": False, "msg": f"请 {int(60-diff)} 秒后再试"}
+    
+    # 生成6位验证码
+    code = f"{random.randint(0, 999999):06d}"
+    now = datetime.now()
+    expires = now + timedelta(minutes=10)
+    con.execute("""INSERT INTO email_codes(email, code, purpose, created_at, expires_at) 
+                   VALUES(?,?,?,?,?)""",
+                (email, code, "register", now.isoformat(), expires.isoformat()))
+    con.commit()
+    con.close()
+    
+    # 发送邮件
+    body = f"""你好！
+
+你的 PlanMate 邮箱验证码是：{code}
+
+验证码 10 分钟内有效，请勿泄露给他人。
+
+—— PlanMate
+"""
+    ok = send_mail(email, "【PlanMate】邮箱验证码", body)
+    if ok:
+        return {"ok": True, "msg": "验证码已发送，请查收"}
+    else:
+        return {"ok": False, "msg": "邮件发送失败，请检查服务器配置"}
+
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "POST":
         user_id = request.form.get("user_id","").strip()
         password = request.form.get("password","")
+        email = request.form.get("email","").strip().lower()
+        code = request.form.get("code","").strip()
+        
         if len(user_id) < 3 or len(user_id) > 24 or not user_id.replace("_","").isalnum():
             flash("ID需为3-24位字母、数字或下划线")
             return render_template("register.html")
         if len(password) < 6:
             flash("密码至少6位")
             return render_template("register.html")
+        if not email or "@" not in email:
+            flash("请输入正确的邮箱")
+            return render_template("register.html")
+        
         con = db()
+        # ⭐ 校验邮箱验证码
+        rec = con.execute("""SELECT * FROM email_codes 
+                             WHERE email=? AND code=? AND purpose='register' AND used=0
+                             ORDER BY created_at DESC LIMIT 1""", 
+                          (email, code)).fetchone()
+        if not rec:
+            con.close()
+            flash("验证码错误或已失效")
+            return render_template("register.html")
+        if datetime.fromisoformat(rec["expires_at"]) < datetime.now():
+            con.close()
+            flash("验证码已过期，请重新发送")
+            return render_template("register.html")
+        
+        # 标记验证码已使用
+        con.execute("UPDATE email_codes SET used=1 WHERE id=?", (rec["id"],))
+        
         try:
-            con.execute("INSERT INTO users(user_id,password_hash,created_at) VALUES(?,?,?)",
-                        (user_id, generate_password_hash(password), datetime.now().isoformat()))
+            con.execute("""INSERT INTO users(user_id,password_hash,email,email_verified,created_at) 
+                           VALUES(?,?,?,1,?)""",
+                        (user_id, generate_password_hash(password), email, datetime.now().isoformat()))
             con.commit()
             flash("注册成功，请登录")
             return redirect(url_for("login"))
@@ -383,7 +502,7 @@ def following():
             feed.append(item_dict)
         
     con.close()
-    # ⭐ 这里也是平级的，不能被包进 else 里面
+    #  这里也是平级的，不能被包进 else 里面
     return render_template("following.html", followed=followed, followed_ids=followed_ids, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
 @app.route("/nudge/<int:plan_id>", methods=["POST"])
 def nudge(plan_id):
@@ -396,8 +515,8 @@ def nudge(plan_id):
         flash("不能提醒自己或该计划不存在")
         return redirect(request.referrer or url_for("following"))
     
-    # ⭐ 后端强制校验冷却时间（2小时）
     now = datetime.now()
+    # 冷却时间校验
     last_nudge = con.execute("""SELECT created_at FROM nudges 
                                 WHERE plan_id=? AND from_user_id=? 
                                 ORDER BY created_at DESC LIMIT 1""", 
@@ -408,13 +527,30 @@ def nudge(plan_id):
             con.close()
             flash("提醒过于频繁，请在2小时后再试")
             return redirect(request.referrer or url_for("following"))
-
+    
     con.execute("INSERT INTO nudges(plan_id,from_user_id,to_user_id,created_at) VALUES(?,?,?,?)",
                 (plan_id, session["uid"], p["user_id"], now.isoformat()))
     con.commit()
+    
+    # ⭐ 发送提醒邮件
+    target = con.execute("SELECT user_id, email, email_verified FROM users WHERE id=?", (p["user_id"],)).fetchone()
+    sender = con.execute("SELECT user_id FROM users WHERE id=?", (session["uid"],)).fetchone()
     con.close()
+    
+    if target and target["email"] and target["email_verified"]:
+        body = f"""你好 @{target['user_id']}！
+
+@{sender['user_id']} 正在监督你完成计划「{p['title']}」的打卡。
+
+今天你还没有打卡，快去 PlanMate 完成吧！
+
+—— PlanMate 监督提醒
+"""
+        send_mail(target["email"], f"【PlanMate】@{sender['user_id']} 提醒你完成打卡", body)
+    
     flash("已发送监督提醒！")
     return redirect(request.referrer or url_for("following"))
+ 
 
 def due_on(p, d):
     start = date.fromisoformat(p["start_date"])

@@ -2,10 +2,63 @@
 <div class="auth-card">
 <h1>创建你的ID</h1><p>ID全站唯一，建议使用容易记忆的昵称。</p>
 <form method="post">
-<input name="user_id" placeholder="3-24位字母、数字、下划线" required>
-<input name="password" type="password" placeholder="至少6位密码" required>
-<button>创建账号</button>
+    <input name="user_id" placeholder="3-24位字母、数字、下划线" required>
+    <input name="password" type="password" placeholder="至少6位密码" required>
+    <input name="email" id="email" type="email" placeholder="常用邮箱（用于接收提醒）" required>
+
+    <!-- 验证码输入框 + 发送按钮 -->
+    <div style="display:flex; gap:8px; align-items:center;">
+        <input name="code" id="code" placeholder="6位验证码" maxlength="6" required style="flex:1;">
+        <button type="button" id="sendBtn" onclick="sendCode()" 
+                style="white-space:nowrap; padding:0 14px; height:100%;">
+            发送验证码
+        </button>
+    </div>
+
+    <button type="submit">创建账号</button>
 </form>
 <a class="muted-link" href="{{url_for('login')}}">已有账号？登录</a>
 </div>
+
+<script>
+async function sendCode() {
+    const email = document.getElementById('email').value.trim();
+    const btn = document.getElementById('sendBtn');
+    if (!email || email.indexOf('@') < 0) { alert('请先填写正确的邮箱'); return; }
+
+    btn.disabled = true;
+    btn.innerText = '发送中...';
+    try {
+        const res = await fetch('{{ url_for("send_code") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email })
+        });
+        const data = await res.json();
+        alert(data.msg);
+        if (data.ok) {
+            // 60秒倒计时
+            let t = 60;
+            btn.innerText = t + '秒后重发';
+            const timer = setInterval(() => {
+                t--;
+                if (t <= 0) {
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    btn.innerText = '发送验证码';
+                } else {
+                    btn.innerText = t + '秒后重发';
+                }
+            }, 1000);
+        } else {
+            btn.disabled = false;
+            btn.innerText = '发送验证码';
+        }
+    } catch (e) {
+        alert('网络错误，请重试');
+        btn.disabled = false;
+        btn.innerText = '发送验证码';
+    }
+}
+</script>
 {% endblock %}
