@@ -95,6 +95,14 @@ def valid_file(name):
 def inject():
     return {"me": current_user(), "today": date.today().isoformat()}
 
+@app.after_request
+def add_header(response):
+    # 禁止所有浏览器（尤其是微信）缓存动态页面
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '-1'
+    return response
+
 @app.route("/")
 def index():
     return redirect(url_for("home") if login_required() else url_for("login"))
@@ -279,20 +287,45 @@ def unfollow():
 @app.route("/following")
 def following():
     if not login_required(): return redirect(url_for("login"))
-    q=request.args.get("q","").strip()
-    con=db()
-    followed=con.execute("""SELECT u.id,u.user_id FROM follows f JOIN users u ON f.following_id=u.id
-                            WHERE f.follower_id=? ORDER BY u.user_id""",(session["uid"],)).fetchall()
-    selected=None; plans=[]; comments=[]
+    q = request.args.get("q","").strip()
+    con = db()
+    
+    # 获取我关注的所有用户
+    followed = con.execute("""SELECT u.id, u.user_id FROM follows f 
+                              JOIN users u ON f.following_id = u.id
+                              WHERE f.follower_id = ? ORDER BY u.user_id""", (session["uid"],)).fetchall()
+    
+    selected = None
+    plans = []
+    comments = []
+    feed = []  # 用于存放关注动态时间线
+    
     if q:
-        selected=con.execute("SELECT id,user_id FROM users WHERE user_id=?",(q,)).fetchone()
-    if selected:
-        plans=con.execute("""SELECT p.* FROM plans p WHERE p.user_id=? ORDER BY p.start_date DESC""",(selected["id"],)).fetchall()
-        for p in plans:
-            comments += list(con.execute("""SELECT c.*,u.user_id FROM comments c JOIN users u ON c.user_id=u.id
-                                           WHERE c.plan_id=? ORDER BY c.created_at DESC""",(p["id"],)).fetchall())
+        # 模式1：搜索或点击了 @xxx 链接，查看特定用户
+        selected = con.execute("SELECT id, user_id FROM users WHERE user_id=?", (q,)).fetchone()
+        if selected:
+            plans = con.execute("""SELECT p.*, u.user_id AS creator_name FROM plans p 
+                                   JOIN users u ON p.user_id = u.id 
+                                   WHERE p.user_id=? ORDER BY p.start_date DESC""", (selected["id"],)).fetchall()
+            for p in plans:
+                comments += list(con.execute("""SELECT c.*, u.user_id AS commenter_name FROM comments c 
+                                                JOIN users u ON c.user_id = u.id
+                                                WHERE c.plan_id=? ORDER BY c.created_at DESC""", (p["id"],)).fetchall())
+    else:
+        # 模式2：没有搜索词，展示“关注动态”时间线
+        # 查询所有已关注用户的打卡记录，按时间倒序排列
+        feed = con.execute("""
+            SELECT c.id, c.checkin_date, c.note, c.file_name, c.stored_name, c.created_at,
+                   u.user_id AS creator_name, p.title AS plan_title, p.id AS plan_id
+            FROM checkins c
+            JOIN plans p ON c.plan_id = p.id
+            JOIN users u ON p.user_id = u.id
+            WHERE p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
+            ORDER BY c.created_at DESC
+        """, (session["uid"],)).fetchall()
+        
     con.close()
-    return render_template("following.html", followed=followed, selected=selected, plans=plans, comments=comments, q=q)
+    return render_template("following.html", followed=followed, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
 
 @app.route("/nudge/<int:plan_id>", methods=["POST"])
 def nudge(plan_id):

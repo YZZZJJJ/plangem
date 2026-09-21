@@ -1,22 +1,90 @@
 {% extends "base.html" %}{% block content %}
-<div class="page-head"><div><h1>关注</h1><p>搜索用户ID，查看公开计划与打卡记录。</p></div></div>
-<section class="panel">
-<form method="get" class="search"><input name="q" value="{{q}}" placeholder="输入用户ID，例如 study_001"><button>搜索</button></form>
-<form method="post" action="{{url_for('follow')}}" class="search"><input name="user_id" placeholder="关注一个用户ID"><button>＋ 关注</button></form>
-</section>
-{% if selected %}
-<section class="panel">
-<h2>@{{selected['user_id']}}</h2>
-{% for p in plans %}
-<div class="public-plan">
-<div><a href="{{url_for('plan_detail',plan_id=p['id'])}}"><h3>{{p['title']}}</h3></a><p>{{p['description']}}</p>
-<span class="meta">每 {{p['interval_days']}} 天 · 开始 {{p['start_date']}}</span></div>
-<form method="post" action="{{url_for('nudge',plan_id=p['id'])}}"><button class="secondary">⏰ 催促</button></form>
+<div class="page-head">
+    <h1>关注</h1>
+    <form method="get" action="{{ url_for('following') }}" class="search-form" style="margin-top:10px;">
+        <input name="q" placeholder="搜索用户ID..." value="{{ q or '' }}" style="padding:8px; width:200px;">
+        <button style="padding:8px 15px;">搜索</button>
+        {% if q %}<a href="{{ url_for('following') }}" style="margin-left:10px;">返回动态</a>{% endif %}
+    </form>
 </div>
-{% else %}<p class="muted">该用户还没有公开计划。</p>{% endfor %}
+
+<!-- 我的关注列表 -->
+<section class="panel">
+    <h2>我的关注</h2>
+    {% if followed %}
+        <div class="follow-list" style="display:flex; flex-wrap:wrap; gap:10px;">
+            {% for f in followed %}
+                <!-- 需求2：@xxx 变成可点击链接，跳转到用户主页 -->
+                <a href="{{ url_for('following', q=f.user_id) }}" class="tag" style="text-decoration:none; padding:5px 10px; background:#eee; border-radius:15px;">@{{ f.user_id }}</a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="muted">还没有关注任何人。搜索并关注感兴趣的用户吧！</p>
+    {% endif %}
 </section>
+
+{% if q and selected %}
+    <!-- ========== 模式1：用户主页（只读查看计划） ========== -->
+    <section class="panel">
+        <h2>@{{ selected.user_id }} 的计划</h2>
+        {% if plans %}
+            {% for p in plans %}
+                <div class="plan-card" style="border:1px solid #eee; padding:15px; margin-bottom:10px; border-radius:8px;">
+                    <h3><a href="{{ url_for('plan_detail', plan_id=p.id) }}" style="text-decoration:none; color:#2c3e50;">{{ p.title }}</a></h3>
+                    <p class="muted">开始日期: {{ p.start_date }} | 每 {{ p.interval_days }} 天打卡</p>
+                    <p>{{ p.description }}</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="muted">该用户还没有制定计划。</p>
+        {% endif %}
+        
+        <!-- 该用户计划下的评论（可选展示） -->
+        {% if comments %}
+            <h3 style="margin-top:20px;">最新评论</h3>
+            {% for c in comments %}
+                <div class="comment" style="margin-top:10px;"><b>@{{ c.commenter_name }}</b>: {{ c.content }}</div>
+            {% endfor %}
+        {% endif %}
+    </section>
+
+{% elif not q %}
+    <!-- ========== 模式2：关注动态（时间线帖子流） ========== -->
+    <section class="panel">
+        <h2>最新动态</h2>
+        {% if feed %}
+            {% for item in feed %}
+                <div class="feed-item" style="border-bottom:1px solid #eee; padding:15px 0;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <div>
+                            <!-- 点击 @xxx 同样跳转到用户主页 -->
+                            <a href="{{ url_for('following', q=item.creator_name) }}" style="font-weight:bold; text-decoration:none;">@{{ item.creator_name }}</a>
+                            在计划 <a href="{{ url_for('plan_detail', plan_id=item.plan_id) }}" style="text-decoration:none;">{{ item.plan_title }}</a> 打卡了
+                        </div>
+                        <span class="muted">{{ item.checkin_date }}</span>
+                    </div>
+                    
+                    {% if item.note %}
+                        <p style="margin-top:8px; color:#333;">{{ item.note }}</p>
+                    {% endif %}
+                    
+                    {% if item.stored_name %}
+                        {% set ext = item.file_name.rsplit('.', 1)[-1].lower() if '.' in item.file_name else '' %}
+                        {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}
+                            <div style="margin-top:10px;">
+                                <a href="{{ url_for('files', name=item.stored_name) }}" target="_blank">
+                                    <img src="{{ url_for('files', name=item.stored_name) }}" style="max-height:150px; border-radius:6px; border:1px solid #ddd;">
+                                </a>
+                            </div>
+                        {% else %}
+                            <p style="margin-top:8px;"><a href="{{ url_for('files', name=item.stored_name) }}">📎 下载附件: {{ item.file_name }}</a></p>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="muted">你关注的人还没有打卡记录，或者你还没有关注任何人。</p>
+        {% endif %}
+    </section>
 {% endif %}
-<section class="panel"><h2>我关注的人</h2>
-{% for u in followed %}<span class="follow-pill">@{{u['user_id']}}</span>{% else %}<p class="muted">暂未关注用户。</p>{% endfor %}
-</section>
 {% endblock %}
