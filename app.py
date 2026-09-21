@@ -312,13 +312,49 @@ def following():
     feed = []
     
     if q:
-        # ========== 模式1：搜索或点击了 @xxx 链接，查看特定用户 ==========
         selected = con.execute("SELECT id, user_id FROM users WHERE user_id=?", (q,)).fetchone()
         if selected:
-            plans = con.execute("""SELECT p.*, u.user_id AS creator_name FROM plans p 
+            raw_plans = con.execute("""SELECT p.*, u.user_id AS creator_name FROM plans p 
                                    JOIN users u ON p.user_id = u.id 
                                    WHERE p.user_id=? ORDER BY p.start_date DESC""", (selected["id"],)).fetchall()
-            for p in plans:
+            
+            # ⭐ 新增：判断提醒按钮逻辑
+            now = datetime.now()
+            today_date = date.today()
+            plans = []
+            for p in raw_plans:
+                p_dict = dict(p)
+                p_dict["show_nudge_btn"] = False
+                p_dict["can_nudge"] = False
+                p_dict["cooldown_msg"] = ""
+                
+                # 1. 今天需要打卡吗？
+                if due_on(p, today_date):
+                    # 2. 今天打卡了吗？
+                    checked = con.execute("SELECT id FROM checkins WHERE plan_id=? AND checkin_date=?", 
+                                          (p["id"], today_date.isoformat())).fetchone()
+                    if not checked:
+                        p_dict["show_nudge_btn"] = True
+                        # 3. 检查冷却时间（2小时 = 7200秒）
+                        last_nudge = con.execute("""SELECT created_at FROM nudges 
+                                                    WHERE plan_id=? AND from_user_id=? 
+                                                    ORDER BY created_at DESC LIMIT 1""", 
+                                                 (p["id"], session["uid"])).fetchone()
+                        if last_nudge:
+                            last_time = datetime.fromisoformat(last_nudge["created_at"])
+                            diff = (now - last_time).total_seconds()
+                            if diff < 7200:
+                                p_dict["can_nudge"] = False
+                                remaining_mins = int((7200 - diff) // 60)
+                                p_dict["cooldown_msg"] = f"冷却中，{remaining_mins}分钟后可再次提醒"
+                            else:
+                                p_dict["can_nudge"] = True
+                        else:
+                            p_dict["can_nudge"] = True
+                plans.append(p_dict)
+
+            # 评论逻辑保持不变（注意这里用的是原变量 p["id"]）
+            for p in raw_plans:
                 comments += list(con.execute("""SELECT c.*, u.user_id AS commenter_name FROM comments c 
                                                 JOIN users u ON c.user_id = u.id
                                                 WHERE c.plan_id=? ORDER BY c.created_at DESC""", (p["id"],)).fetchall())
@@ -352,14 +388,33 @@ def following():
 @app.route("/nudge/<int:plan_id>", methods=["POST"])
 def nudge(plan_id):
     if not login_required(): return redirect(url_for("login"))
-    con=db()
-    p=con.execute("SELECT * FROM plans WHERE id=?",(plan_id,)).fetchone()
-    if p and p["user_id"] != session["uid"]:
-        con.execute("INSERT INTO nudges(plan_id,from_user_id,to_user_id,created_at) VALUES(?,?,?,?)",
-                    (plan_id,session["uid"],p["user_id"],datetime.now().isoformat()))
-        con.commit(); flash("已发送催促")
+    con = db()
+    p = con.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+    
+    if not p or p["user_id"] == session["uid"]:
+        con.close()
+        flash("不能提醒自己或该计划不存在")
+        return redirect(request.referrer or url_for("following"))
+    
+    # ⭐ 后端强制校验冷却时间（2小时）
+    now = datetime.now()
+    last_nudge = con.execute("""SELECT created_at FROM nudges 
+                                WHERE plan_id=? AND from_user_id=? 
+                                ORDER BY created_at DESC LIMIT 1""", 
+                             (plan_id, session["uid"])).fetchone()
+    if last_nudge:
+        last_time = datetime.fromisoformat(last_nudge["created_at"])
+        if (now - last_time).total_seconds() < 7200:
+            con.close()
+            flash("提醒过于频繁，请在2小时后再试")
+            return redirect(request.referrer or url_for("following"))
+
+    con.execute("INSERT INTO nudges(plan_id,from_user_id,to_user_id,created_at) VALUES(?,?,?,?)",
+                (plan_id, session["uid"], p["user_id"], now.isoformat()))
+    con.commit()
     con.close()
-    return render_template("following.html", followed=followed, followed_ids=followed_ids, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
+    flash("已发送监督提醒！")
+    return redirect(request.referrer or url_for("following"))
 
 def due_on(p, d):
     start = date.fromisoformat(p["start_date"])
