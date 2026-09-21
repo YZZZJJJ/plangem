@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block content %}
 <div class="page-head">
 <div><div class="tag">每 {{plan['interval_days']}} 天打卡</div><h1>{{plan['title']}}</h1><p>{{plan['description']}}</p></div>
-<a class="button secondary" href="{{url_for('calendar')}}">查看日历</a>
+<a class="button secondary" href="{{url_for('calendar', user_id=plan['user_id'])}}">查看日历</a>
 </div>
 <section class="panel">
 {% if plan['user_id'] == me['id'] %}

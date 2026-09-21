@@ -376,33 +376,60 @@ def due_on(p, d):
 @app.route("/calendar")
 def calendar():
     if not login_required(): return redirect(url_for("login"))
-    month=request.args.get("month", date.today().strftime("%Y-%m"))
+    month = request.args.get("month", date.today().strftime("%Y-%m"))
+    
+    # ⭐ 新增：获取要查看的用户ID
+    target_user_id = request.args.get("user_id", type=int)
+    
     try:
-        y,m=map(int,month.split("-"))
-        first=date(y,m,1)
+        y, m = map(int, month.split("-"))
+        first = date(y, m, 1)
     except:
-        first=date.today().replace(day=1); y,m=first.year,first.month
+        first = date.today().replace(day=1); y, m = first.year, first.month
+        
     import calendar as cal
-    days=cal.monthrange(y,m)[1]
-    con=db()
-    plans=con.execute("SELECT * FROM plans WHERE user_id=?",(session["uid"],)).fetchall()
-    checks=con.execute("""SELECT c.checkin_date,c.plan_id FROM checkins c JOIN plans p ON c.plan_id=p.id
-                          WHERE p.user_id=? AND c.checkin_date BETWEEN ? AND ?""",
-                      (session["uid"],first.isoformat(),date(y,m,days).isoformat())).fetchall()
+    days = cal.monthrange(y, m)[1]
+    con = db()
+    
+    # ⭐ 新增：判断查看的是自己还是别人
+    if target_user_id and target_user_id != session["uid"]:
+        target_user = con.execute("SELECT id, user_id FROM users WHERE id=?", (target_user_id,)).fetchone()
+        if not target_user:
+            con.close()
+            flash("未找到该用户")
+            return redirect(url_for("following"))
+        view_uid = target_user["id"]
+        is_owner = False
+        view_name = target_user["user_id"]
+    else:
+        view_uid = session["uid"]
+        is_owner = True
+        view_name = "我"
+        
+    # 查询指定用户的计划和打卡记录
+    plans = con.execute("SELECT * FROM plans WHERE user_id=?", (view_uid,)).fetchall()
+    checks = con.execute("""SELECT c.checkin_date, c.plan_id FROM checkins c JOIN plans p ON c.plan_id=p.id
+                            WHERE p.user_id=? AND c.checkin_date BETWEEN ? AND ?""",
+                        (view_uid, first.isoformat(), date(y, m, days).isoformat())).fetchall()
     con.close()
-    checked={(r["checkin_date"],r["plan_id"]) for r in checks}
-    cells=[]
+    
+    checked = {(r["checkin_date"], r["plan_id"]) for r in checks}
+    cells = []
     for i in range(first.weekday()):
         cells.append(None)
-    for n in range(1,days+1):
-        d=date(y,m,n)
-        due=[{"id":p["id"],"title":p["title"],"done":(d.isoformat(),p["id"]) in checked}
-             for p in plans if due_on(p,d)]
-        cells.append({"date":d.isoformat(),"day":n,"due":due})
-    while len(cells)%7: cells.append(None)
-    prev=(first-timedelta(days=1)).strftime("%Y-%m")
-    nxt=(first+timedelta(days=32)).replace(day=1).strftime("%Y-%m")
-    return render_template("calendar.html", cells=cells, month=f"{y}年{m}月", prev=prev, nxt=nxt)
+    for n in range(1, days+1):
+        d = date(y, m, n)
+        due = [{"id": p["id"], "title": p["title"], "done": (d.isoformat(), p["id"]) in checked}
+               for p in plans if due_on(p, d)]
+        cells.append({"date": d.isoformat(), "day": n, "due": due})
+    while len(cells) % 7: cells.append(None)
+    
+    prev = (first - timedelta(days=1)).strftime("%Y-%m")
+    nxt = (first + timedelta(days=32)).replace(day=1).strftime("%Y-%m")
+    
+    # ⭐ 注意：把 is_owner 和 view_name 传给模板
+    return render_template("calendar.html", cells=cells, month=f"{y}年{m}月", prev=prev, nxt=nxt, 
+                           is_owner=is_owner, view_name=view_name, target_user_id=target_user_id)
 
 init_db()
 if __name__ == "__main__":
