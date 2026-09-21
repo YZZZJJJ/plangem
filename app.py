@@ -83,6 +83,10 @@ def current_user():
     con = db()
     u = con.execute("SELECT * FROM users WHERE id=?", (session["uid"],)).fetchone()
     con.close()
+
+    if not u:
+        session.pop("uid", None)
+        return None
     return u
 
 def login_required():

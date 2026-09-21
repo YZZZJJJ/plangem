@@ -18,6 +18,12 @@
     <a href="{{ url_for('logout') }}">退出</a>
   </nav>
   <span class="uid">@{{ me['user_id'] }}</span>
+  {% else %}
+  <!-- ⭐ 新增：当未登录或登录失效时，显示登录和注册按钮 -->
+  <nav>
+    <a href="{{ url_for('login') }}">登录</a>
+    <a href="{{ url_for('register') }}">注册</a>
+  </nav>
   {% endif %}
 </header>
 {% if me %}<div class="mobile-nav"><a href="{{ url_for('home') }}">个人</a><a href="{{ url_for('following') }}">关注</a><a href="{{ url_for('calendar') }}">日历</a><a href="{{ url_for('new_plan') }}">新建</a></div>{% endif %}
