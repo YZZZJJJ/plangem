@@ -274,7 +274,7 @@ def follow():
         except sqlite3.IntegrityError:
             flash("已经关注")
     con.close()
-    return redirect(url_for("following"))
+    return redirect(request.referrer or url_for("following"))
 
 @app.route("/unfollow", methods=["POST"])
 def unfollow():
@@ -282,7 +282,7 @@ def unfollow():
     con=db()
     con.execute("DELETE FROM follows WHERE follower_id=? AND following_id=?",(session["uid"],request.form["target_id"]))
     con.commit(); con.close()
-    return redirect(url_for("following"))
+    return redirect(request.referrer or url_for("following"))
 
 @app.route("/following")
 def following():
@@ -294,6 +294,7 @@ def following():
     followed = con.execute("""SELECT u.id, u.user_id FROM follows f 
                               JOIN users u ON f.following_id = u.id
                               WHERE f.follower_id = ? ORDER BY u.user_id""", (session["uid"],)).fetchall()
+    followed_ids = [f["id"] for f in followed]
     
     selected = None
     plans = []
@@ -337,7 +338,7 @@ def nudge(plan_id):
                     (plan_id,session["uid"],p["user_id"],datetime.now().isoformat()))
         con.commit(); flash("已发送催促")
     con.close()
-    return redirect(request.referrer or url_for("following"))
+    return render_template("following.html", followed=followed, followed_ids=followed_ids, selected=selected, plans=plans, comments=comments, feed=feed, q=q)
 
 def due_on(p, d):
     start = date.fromisoformat(p["start_date"])

@@ -1,11 +1,17 @@
 {% extends "base.html" %}{% block content %}
 <div class="page-head">
     <h1>关注</h1>
-    <form method="get" action="{{ url_for('following') }}" class="search-form" style="margin-top:10px;">
-        <input name="q" placeholder="搜索用户ID..." value="{{ q or '' }}" style="padding:8px; width:200px;">
-        <button style="padding:8px 15px;">搜索</button>
-        {% if q %}<a href="{{ url_for('following') }}" style="margin-left:10px;">返回动态</a>{% endif %}
-    </form>
+    
+    <!-- 只有在动态流页面（没有 q 参数时）才显示搜索框 -->
+    {% if not q %}
+        <form method="get" action="{{ url_for('following') }}" class="search-form" style="margin-top:10px;">
+            <input name="q" placeholder="搜索用户ID..." style="padding:8px; width:200px;">
+            <button style="padding:8px 15px;">搜索</button>
+        </form>
+    {% else %}
+        <!-- 进入用户主页后，隐藏搜索框，只显示返回按钮 -->
+        <a href="{{ url_for('following') }}" class="button secondary" style="margin-top:10px; text-decoration:none; display:inline-block;">← 返回动态</a>
+    {% endif %}
 </div>
 
 <!-- 我的关注列表 -->
@@ -14,7 +20,7 @@
     {% if followed %}
         <div class="follow-list" style="display:flex; flex-wrap:wrap; gap:10px;">
             {% for f in followed %}
-                <!-- 需求2：@xxx 变成可点击链接，跳转到用户主页 -->
+                <!-- @xxx 变成可点击链接 -->
                 <a href="{{ url_for('following', q=f.user_id) }}" class="tag" style="text-decoration:none; padding:5px 10px; background:#eee; border-radius:15px;">@{{ f.user_id }}</a>
             {% endfor %}
         </div>
@@ -26,20 +32,41 @@
 {% if q and selected %}
     <!-- ========== 模式1：用户主页（只读查看计划） ========== -->
     <section class="panel">
-        <h2>@{{ selected.user_id }} 的计划</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>@{{ selected.user_id }} 的计划</h2>
+            
+            <!-- 关注 / 取消关注 按钮 -->
+            {% if selected.id in followed_ids %}
+                <form method="post" action="{{ url_for('unfollow') }}" style="margin:0;">
+                    <input type="hidden" name="target_id" value="{{ selected.id }}">
+                    <button class="button secondary" style="padding:6px 12px; font-size:14px;">取消关注</button>
+                </form>
+            {% else %}
+                <form method="post" action="{{ url_for('follow') }}" style="margin:0;">
+                    <input type="hidden" name="user_id" value="{{ selected.user_id }}">
+                    <button class="button" style="padding:6px 12px; font-size:14px;">+ 关注</button>
+                </form>
+            {% endif %}
+        </div>
+
         {% if plans %}
             {% for p in plans %}
-                <div class="plan-card" style="border:1px solid #eee; padding:15px; margin-bottom:10px; border-radius:8px;">
-                    <h3><a href="{{ url_for('plan_detail', plan_id=p.id) }}" style="text-decoration:none; color:#2c3e50;">{{ p.title }}</a></h3>
-                    <p class="muted">开始日期: {{ p.start_date }} | 每 {{ p.interval_days }} 天打卡</p>
-                    <p>{{ p.description }}</p>
+                <!-- 整个卡片可点击 -->
+                <div class="plan-card" 
+                     onclick="window.location.href='{{ url_for('plan_detail', plan_id=p.id) }}';" 
+                     style="border:1px solid #eee; padding:15px; margin-bottom:10px; border-radius:8px; margin-top:15px; cursor: pointer; transition: background 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f9f9f9'" 
+                     onmouseout="this.style.backgroundColor='transparent'">
+                    
+                    <h3 style="color:#2c3e50; margin-top:0;">{{ p.title }}</h3>
+                    <p class="muted" style="margin-bottom:5px;">开始日期: {{ p.start_date }} | 每 {{ p.interval_days }} 天打卡</p>
+                    <p style="margin-bottom:0;">{{ p.description }}</p>
                 </div>
             {% endfor %}
         {% else %}
-            <p class="muted">该用户还没有制定计划。</p>
+            <p class="muted" style="margin-top:15px;">该用户还没有制定计划。</p>
         {% endif %}
         
-        <!-- 该用户计划下的评论（可选展示） -->
         {% if comments %}
             <h3 style="margin-top:20px;">最新评论</h3>
             {% for c in comments %}
@@ -57,7 +84,6 @@
                 <div class="feed-item" style="border-bottom:1px solid #eee; padding:15px 0;">
                     <div style="display:flex; justify-content:space-between;">
                         <div>
-                            <!-- 点击 @xxx 同样跳转到用户主页 -->
                             <a href="{{ url_for('following', q=item.creator_name) }}" style="font-weight:bold; text-decoration:none;">@{{ item.creator_name }}</a>
                             在计划 <a href="{{ url_for('plan_detail', plan_id=item.plan_id) }}" style="text-decoration:none;">{{ item.plan_title }}</a> 打卡了
                         </div>
