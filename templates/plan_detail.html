@@ -46,8 +46,8 @@
 </section>
 <section class="panel">
 <h2>评论</h2>
-<form method="post" action="{{url_for('comment',plan_id=plan['id'])}}" class="comment-form">
-<input name="content" placeholder="留下鼓励、建议或提醒…" required><button>评论</button>
+<form method="post" action="{{url_for('comment',plan_id=plan['id'])}}" class="comment-form" 
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerText='提交中...';"><input name="content" placeholder="留下鼓励、建议或提醒…" required><button>评论</button>
 </form>
 {% for c in comments %}<div class="comment"><b>@{{c['commenter_name']}}</b><span>{{c['content']}}</span></div>{% else %}<p class="muted">暂无评论。</p>{% endfor %}
 </section>
